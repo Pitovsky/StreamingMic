@@ -1,0 +1,63 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Nothing to see here</title>
+    <meta name="description" content="Leave me alone">
+    <!--script type="text/javascript" charset="UTF-8" src="/static/js/ws-audio-api.min.js"></script-->
+  </head>
+  <script>
+    function getHostAddress() {
+	    if (window.location.port) {
+		    return window.location.hostname + ':' + window.location.port;
+	    } else {
+		    return window.location.hostname;
+	    }
+    }
+    
+    function hasGetUserMedia() {
+      return !!(navigator.mediaDevices &&
+        navigator.mediaDevices.getUserMedia);
+    }
+
+    if (!hasGetUserMedia()) {
+      alert('getUserMedia() is not supported by your browser');
+    }
+    
+    var constraints = {
+      video: false, // maybe someday later
+      audio: true
+    };
+    
+    /*var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	  socket = new WebSocket(protocol + '//' + getHostAddress() + '/audio' + window.location.search);
+    var streamer = new WSAudioAPI.Streamer({
+      codec: {
+	      sampleRate: 24000,
+	      channels: 1,
+	      app: 2048,
+	      frameDuration: 20,
+	      bufferSize: 4096
+      }
+    }, socket);
+    streamer.start();*/
+    
+    var audioContext = new(window.AudioContext || window.webkitAudioContext)();
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(function (stream) {
+        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	      var socket = new WebSocket(protocol + '//' + getHostAddress() + '/audio' + window.location.search);
+	      var audioInput = audioContext.createMediaStreamSource(stream);
+	      var gainNode = audioContext.createGain();
+	      var recorder = audioContext.createScriptProcessor(4096, 1, 1);
+	      recorder.onaudioprocess = function(e) {
+					if (socket.readyState == 1) {
+					  socket.send(e.inputBuffer.getChannelData(0)); // by default: 4096 x 32-bit float, 44100 Hz
+					}
+				};
+				gainNode.gain.value = 1.0;
+				audioInput.connect(gainNode);
+				gainNode.connect(recorder);
+				recorder.connect(audioContext.destination);
+      });
+  </script>
+</html>
