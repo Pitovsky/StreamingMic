@@ -94,7 +94,7 @@
 				recorder.connect(audioContext.destination);
 				
 				setInterval(function() {
-				  if (socket && socket.readyState == 1) {
+				  if (socket && socket.readyState == 1 && socket.bufferedAmount == 0) {
 				    var end = dataCacheEndPos; // store it to avoid change in parallel
 				    if (end < dataCacheBegPos) {
 				      if (dataCacheBegPos < dataCache.length) {
