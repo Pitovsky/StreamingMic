@@ -6,6 +6,12 @@
     <!--script type="text/javascript" charset="UTF-8" src="/static/js/ws-audio-api.min.js"></script-->
   </head>
   <script>
+    var reconnectTimer;
+    var socket;
+    var dataCache = new Float32Array(24576000); // approx 10 min cache, 100 Mb
+    var dataCacheBegPos = 0;
+    var dataCacheEndPos = 0;
+  
     function getHostAddress() {
 	    if (window.location.port) {
 		    return window.location.hostname + ':' + window.location.port;
@@ -17,6 +23,24 @@
     function hasGetUserMedia() {
       return !!(navigator.mediaDevices &&
         navigator.mediaDevices.getUserMedia);
+    }
+    
+    function connectSocket() {
+      var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(protocol + '//' + getHostAddress() + '/audio' + window.location.search);
+      socket.onclose = function () {
+	      if (!reconnectTimer) {
+		      reconnectTimer = 300;
+	      } else {
+		      if (reconnectTimer < 9000) {
+			      reconnectTimer = reconnectTimer * 2;
+		      }
+	      }
+	      console.log('no connection, retry in ' + reconnectTimer + 'ms');
+	      setTimeout(function () {
+		      connectSocket();
+	      }, reconnectTimer);
+      };
     }
 
     if (!hasGetUserMedia()) {
@@ -44,20 +68,48 @@
     var audioContext = new(window.AudioContext || window.webkitAudioContext)();
     navigator.mediaDevices.getUserMedia(constraints)
       .then(function (stream) {
-        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	      var socket = new WebSocket(protocol + '//' + getHostAddress() + '/audio' + window.location.search);
+        connectSocket();
+	      
 	      var audioInput = audioContext.createMediaStreamSource(stream);
 	      var gainNode = audioContext.createGain();
 	      var recorder = audioContext.createScriptProcessor(4096, 1, 1);
 	      recorder.onaudioprocess = function(e) {
-					if (socket.readyState == 1) {
-					  socket.send(e.inputBuffer.getChannelData(0)); // by default: 4096 x 32-bit float, 44100 Hz
+	        var newEnd = -1;
+	        if (dataCacheEndPos + 4096 > dataCache.length) {
+	          dataCache.set(e.inputBuffer.getChannelData(0), 0); // by default: 4096 x 32-bit float, 44100 Hz
+	          newEnd = 4096;
+	        } else {
+            dataCache.set(e.inputBuffer.getChannelData(0), dataCacheEndPos);
+            newEnd = dataCacheEndPos + 4096;
+					}
+					if (newEnd == dataCacheBegPos) {
+					  console.log('WARN: END OF CACHE, SKIPPING NEW DATA');
+					} else {
+					  dataCacheEndPos = newEnd;
 					}
 				};
 				gainNode.gain.value = 1.0;
 				audioInput.connect(gainNode);
 				gainNode.connect(recorder);
 				recorder.connect(audioContext.destination);
+				
+				setInterval(function() {
+				  if (socket && socket.readyState == 1) {
+				    var end = dataCacheEndPos; // store it to avoid change in parallel
+				    if (end < dataCacheBegPos) {
+				      if (dataCacheBegPos < dataCache.length) {
+				        //onsole.log('send ' + dataCacheBegPos + ' to ' + dataCache.length);
+				        socket.send(dataCache.subarray(dataCacheBegPos, dataCache.length));
+				      }
+				      dataCacheBegPos = 0
+				    }
+				    if (dataCacheBegPos < end) {
+				      //console.log('send ' + dataCacheBegPos + ' to ' + end);
+				      socket.send(dataCache.subarray(dataCacheBegPos, end));
+				    }
+				    dataCacheBegPos = end;
+				  }
+				}, 300);
       });
   </script>
 </html>
